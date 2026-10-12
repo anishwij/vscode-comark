@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { formatter, getDocumentFoldingRanges, findMatchingBrackets } from '@nuxtlabs/monarch-mdc'
 import { getMdcComponentCompletionItemProvider, getMdcComponentPropCompletionItemProvider, createCacheCleanupListeners } from './completion-providers'
-import { getComponentMetadata } from './component-metadata'
+import { getComponentMetadata, registerMetadataWatchers } from './component-metadata'
 import { ensureOutputChannel, logger } from './logger'
 
 let outputChannel: vscode.OutputChannel | null = null
@@ -127,7 +127,7 @@ export function activate (context: vscode.ExtensionContext) {
   try {
     // Initialize output channel
     outputChannel = ensureOutputChannel(outputChannel)
-    context.subscriptions.push(outputChannel)
+    context.subscriptions.push(outputChannel, registerMetadataWatchers())
 
     logger('Activating MDC extension...')
 
@@ -159,6 +159,7 @@ export function activate (context: vscode.ExtensionContext) {
       const config = vscode.workspace.getConfiguration('mdc')
       const formattingEnabled = config.get<boolean>('enableFormatting', false)
       const componentCompletionsEnabled = config.get<boolean>('enableComponentMetadataCompletions', false)
+        || vscode.workspace.workspaceFolders?.some(folder => vscode.workspace.getConfiguration('mdc', folder.uri).get<boolean>('enableComponentMetadataCompletions', false))
 
       if (formattingEnabled) {
         logger('Registering MDC formatters...')
@@ -188,62 +189,53 @@ export function activate (context: vscode.ExtensionContext) {
         context.subscriptions.push(createCacheCleanupListeners())
 
         // Initialize component name and prop completion providers
-        getComponentMetadata(true).then(() => {
-          logger('Initial MDC component metadata fetch completed.')
+        logger('Registering MDC component completion providers.')
 
-          mdcComponentCompletionProvider = vscode.languages.registerCompletionItemProvider(mdcDocumentSelector, {
-            provideCompletionItems: async (document, position) => {
-              const mdcComponents = await getComponentMetadata()
-              // If no components, exit early
-              if (!mdcComponents || !mdcComponents?.length) {
-                return
-              }
-              return getMdcComponentCompletionItemProvider(mdcComponents, { document, position })
+        mdcComponentCompletionProvider = vscode.languages.registerCompletionItemProvider(mdcDocumentSelector, {
+          provideCompletionItems: async (document, position) => {
+            const mdcComponents = await getComponentMetadata(false, document.uri)
+            // If no components, exit early
+            if (!mdcComponents || !mdcComponents?.length) {
+              return
             }
-          },
-          ':' // Trigger on colon
-          )
+            return getMdcComponentCompletionItemProvider(mdcComponents, { document, position })
+          }
+        },
+        ':' // Trigger on colon
+        )
 
-          // Register MDC block component completion provider
-          mdcComponentPropsCompletionProvider = vscode.languages.registerCompletionItemProvider(mdcDocumentSelector, {
-            provideCompletionItems: async (document, position) => {
-              const mdcComponents = await getComponentMetadata()
-              // If no components, exit early
-              if (!mdcComponents || !mdcComponents?.length) {
-                return
-              }
-              return getMdcComponentPropCompletionItemProvider(mdcComponents, { document, position })
+        // Register MDC block component completion provider
+        mdcComponentPropsCompletionProvider = vscode.languages.registerCompletionItemProvider(mdcDocumentSelector, {
+          provideCompletionItems: async (document, position) => {
+            const mdcComponents = await getComponentMetadata(false, document.uri)
+            // If no components, exit early
+            if (!mdcComponents || !mdcComponents?.length) {
+              return
             }
-          },
-          '\n', // Trigger newline
-          ' ', // Trigger on space character
-          ':', '"', "'", '{', '=' // Trigger YAML values and component attributes
-          )
-
-          // Add to subscriptions for cleanup on deactivate
-          context.subscriptions.push(
-            mdcComponentCompletionProvider,
-            mdcComponentPropsCompletionProvider
-          )
-
-          // Dispose component metadata refresh command
-          if (refreshMetadata) {
-            refreshMetadata.dispose()
+            return getMdcComponentPropCompletionItemProvider(mdcComponents, { document, position })
           }
+        },
+        '\n', // Trigger newline
+        ' ', // Trigger on space character
+        ':', '"', "'", '{', '=' // Trigger YAML values and component attributes
+        )
 
-          refreshMetadata = vscode.commands.registerCommand('mdc.refreshMetadata', async () => {
-            await getComponentMetadata(true)
-          })
-          // Register refresh metadata command
-          context.subscriptions.push(refreshMetadata)
-        }).catch((error) => {
-          const errorMessage = `MDC: Error fetching component metadata: ${error.message}`
-          if (outputChannel) {
-            logger(errorMessage, 'error')
-          }
-          vscode.window.showErrorMessage(errorMessage)
-          throw error // Re-throw to ensure VS Code knows the action failed
+        // Add to subscriptions for cleanup on deactivate
+        context.subscriptions.push(
+          mdcComponentCompletionProvider,
+          mdcComponentPropsCompletionProvider
+        )
+
+        // Dispose component metadata refresh command
+        if (refreshMetadata) {
+          refreshMetadata.dispose()
+        }
+
+        refreshMetadata = vscode.commands.registerCommand('mdc.refreshMetadata', async () => {
+          await getComponentMetadata(true)
         })
+        // Register refresh metadata command
+        context.subscriptions.push(refreshMetadata)
       }
     }
 

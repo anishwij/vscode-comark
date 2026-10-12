@@ -11,7 +11,7 @@ export function isInsideYamlScalar (lines: string[], lineNumber: number, start: 
       if (!line.trim() || indentation(line) > scalarIndent) { continue }
       scalarIndent = undefined
     }
-    const value = quote ? line : line.match(/^\s*[\w-]+:\s*(.*)$/)?.[1]
+    const value = quote ? line : line.match(/^\s*[\w$-]+:\s*(.*)$/)?.[1]
     if (value === undefined) { continue }
     if (!quote && /^[|>][\d+-]*(?:\s+#.*)?\s*$/.test(value)) {
       scalarIndent = indentation(line)
@@ -42,7 +42,7 @@ export interface YamlValuePosition {
 
 /** Locate one scalar value, including its quotes, but excluding an inline comment. */
 export function getYamlValuePosition (line: string, character: number): YamlValuePosition | undefined {
-  const property = line.match(/^\s*([\w-]+):/)
+  const property = line.match(/^\s*([\w$-]+):/)
   if (!property) { return }
   if (character < property[0].length) { return }
   let valueStart = property[0].length

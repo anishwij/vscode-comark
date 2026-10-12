@@ -100,7 +100,7 @@ export function getDocumentContext (lines: string[], lineNumber: number): Docume
             : new RegExp(`^${block.marker[0]}{${block.marker.length},}\\s*$`).test(lines[j].trim())
           if (closing) { end = j; break }
         }
-        const firstProp = lines.slice(block.start + 1, end).find(value => /^\s*[\w-]+\s*:/.test(value))
+        const firstProp = lines.slice(block.start + 1, end).find(value => /^\s*[\w$-]+\s*:/.test(value))
         return { protected: true, comment: false, yaml: { component: block.component, start: block.start, end, indent: firstProp ? indentation(firstProp) : block.indent } }
       }
       if (i === lineNumber) { return { protected: true, comment: false } }

@@ -14,3 +14,5 @@ vsc-extension-quickstart.md
 **/*.ts
 example.md
 scritps/**
+
+!node_modules/typescript/lib/*.d.ts

@@ -2,10 +2,21 @@ import * as vscode from 'vscode'
 import { kebabCase } from 'scule'
 import type { MDCComponentData } from './completion-providers'
 import { logger } from './logger'
+import * as path from 'node:path'
+import { findReactConfig, getReactMetadata, invalidateReactMetadata } from './utils/react/metadata'
+import { clearCompletionMetadataCaches } from './completion-providers'
 
-let metadataCache: MDCComponentData[] | null = null
-let lastSuccessfulFile: string | null = null
-let lastFetch = 0
+interface MetadataCache {
+  metadata: MDCComponentData[] | null
+  lastFile: string | null
+  lastFetch: number
+  generation: number
+  folder?: vscode.WorkspaceFolder
+  project?: string
+  source?: 'url' | 'local' | 'react'
+  pending?: Promise<MDCComponentData[] | null>
+}
+const scopes = new Map<string, MetadataCache>()
 const DEFAULT_CACHE_TTL_MINUTES = 30 // 30 minutes
 
 /**
@@ -16,7 +27,7 @@ const DEFAULT_CACHE_TTL_MINUTES = 30 // 30 minutes
  * @returns A Promise that resolves to the fetched metadata object, or null if the fetch fails
  * @throws Will throw an error if the fetch response is not ok
  */
-async function fetchRemoteComponentMetadata (url: string, force = false): Promise<MDCComponentData[] | null> {
+async function fetchRemoteComponentMetadata (url: string, force = false, resource?: vscode.Uri): Promise<MDCComponentData[] | null> {
   try {
     logger(`Fetching MDC component metadata from: ${url}`)
     vscode.window.showInformationMessage(`MDC: Fetching component metadata from: ${url}`)
@@ -33,13 +44,14 @@ async function fetchRemoteComponentMetadata (url: string, force = false): Promis
       metadataContent: data,
       filePath: url,
       force,
-      source: 'remote'
+      source: 'remote',
+      resource
     })
 
     if (metadata) {
       const message = `MDC: Component metadata fetched successfully (${metadata.length} components found).`
       vscode.window.showInformationMessage(message)
-      const config = vscode.workspace.getConfiguration('mdc')
+      const config = vscode.workspace.getConfiguration('mdc', resource)
       if (config.get('debug')) {
         logger(message)
       }
@@ -63,6 +75,7 @@ interface ProcessMetadataOptions {
   force?: boolean
   /** Indicates whether the content is from a local file or remote URL */
   source?: 'remote' | 'local'
+  resource?: vscode.Uri
 }
 
 /**
@@ -83,9 +96,10 @@ const processMetadataFile = ({
   metadataContent,
   filePath,
   source = 'local',
-  force = false
+  force = false,
+  resource
 }: ProcessMetadataOptions): MDCComponentData[] | null => {
-  const config = vscode.workspace.getConfiguration('mdc')
+  const config = vscode.workspace.getConfiguration('mdc', resource)
   const textContent = new TextDecoder().decode(metadataContent)
 
   logger(`Processing ${source} metadata from: ${filePath}`)
@@ -98,7 +112,7 @@ const processMetadataFile = ({
       'mdc_name' in directContent[0] &&
       'component_meta' in directContent[0] &&
       'meta' in directContent[0].component_meta) {
-      const config = vscode.workspace.getConfiguration('mdc')
+      const config = vscode.workspace.getConfiguration('mdc', resource)
       if (config.get('debug')) {
         logger(`${directContent.length} components found (no data transformation needed).`)
       }
@@ -140,7 +154,8 @@ const processMetadataFile = ({
             metadataContent: new TextEncoder().encode(match[1]),
             filePath,
             force,
-            source: 'remote' // Treat exported content as if it were remote JSON
+            source: 'remote', // Treat exported content as if it were remote JSON
+            resource
           })
         } catch {
           logger('Export pattern processing failed.', 'error')
@@ -156,41 +171,42 @@ const processMetadataFile = ({
 /**
  * Attempts to find and load local component metadata from `.nuxt/component-meta.mjs` files in the current workspace or its subdirectories.
  */
-async function fetchLocalComponentMetadata (force = false): Promise<MDCComponentData[] | null> {
-  const config = vscode.workspace.getConfiguration('mdc')
+async function fetchLocalComponentMetadata (entry: MetadataCache, force = false, resource?: vscode.Uri): Promise<MDCComponentData[] | null> {
+  const config = vscode.workspace.getConfiguration('mdc', resource)
   const metadataFilePattern = config.get<string>('componentMetadataLocalFilePattern', '**/.nuxt/component-meta.mjs')
   const metadataExcludeDirectoriesPattern = config.get<string>('componentMetadataLocalExcludePattern', '{**/node_modules/**,**/dist/**,**/.output/**,**/.cache/**,**/.playground/**}')
 
   try {
-    const workspaceFolders = vscode.workspace.workspaceFolders
-    if (!workspaceFolders?.length) {
+    const folder = entry.folder
+    if (!folder) {
       logger('No workspace folders found.')
       return null
     }
 
     // If we have a cached file path and this isn't a force refresh, try it first
-    if (!force && lastSuccessfulFile) {
+    if (!force && entry.lastFile) {
       try {
-        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(lastSuccessfulFile))
+        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(entry.lastFile))
         const metadata = processMetadataFile({
           metadataContent: fileContent,
-          filePath: lastSuccessfulFile,
+          filePath: entry.lastFile,
           force,
-          source: 'local'
+          source: 'local',
+          resource
         })
         if (metadata) {
           return metadata
         }
         // If processing failed, clear the cache and continue with full search
-        lastSuccessfulFile = null
+        entry.lastFile = null
       } catch (error: any) {
         logger(`Cached file no longer accessible: ${error.message}`)
-        lastSuccessfulFile = null
+        entry.lastFile = null
       }
     }
 
     // Full file search if needed
-    const sourceFilePattern = new vscode.RelativePattern(workspaceFolders[0], metadataFilePattern)
+    const sourceFilePattern = new vscode.RelativePattern(folder, metadataFilePattern)
     // Find files, excluding the provided directory patterns
     const files = await vscode.workspace.findFiles(sourceFilePattern, metadataExcludeDirectoriesPattern)
     if (!files.length) {
@@ -207,10 +223,11 @@ async function fetchLocalComponentMetadata (force = false): Promise<MDCComponent
           metadataContent: fileContent,
           filePath: file.fsPath,
           force,
-          source: 'local'
+          source: 'local',
+          resource
         })
         if (metadata) {
-          lastSuccessfulFile = file.fsPath
+          entry.lastFile = file.fsPath
           return metadata
         }
       } catch (parseError) {
@@ -227,69 +244,83 @@ async function fetchLocalComponentMetadata (force = false): Promise<MDCComponent
   }
 }
 
-/**
- * Retrieves metadata from a configured URL with caching support.
- * @param {boolean} force - When true, bypasses cache and forces a new fetch. Defaults to false.
- * @returns {Promise<MDCComponentData[]>} Promise resolving to metadata object, or null if URL is not configured or fetch fails
- * @throws {Error} Potentially throws if network request fails
- *
- * The function will:
- * - Check configuration for metadata URL and cache TTL
- * - Show warning if force=true but URL not configured
- * - Return cached data if within TTL period
- * - Fetch new data if cache expired or force=true
- * - Update cache with new data if fetch successful
- */
-export async function getComponentMetadata (force = false): Promise<MDCComponentData[] | null> {
-  const config = vscode.workspace.getConfiguration('mdc')
-  const componentCompletionsEnabled = config.get<boolean>('enableComponentMetadataCompletions', false)
-  const componentMetadataCacheTTL: number = 60 * 1000 * Number(config.get<number>('componentMetadataCacheTTL') || DEFAULT_CACHE_TTL_MINUTES)
-  const now = Date.now()
-
-  // Check if we should skip fetching (not forced and within TTL)
-  if (!force && lastFetch > 0 && (now - lastFetch) < componentMetadataCacheTTL) {
-    if (metadataCache) {
-      return metadataCache
+/** Load document-scoped URL/local metadata, falling back to React discovery, with coalesced caching. */
+export async function getComponentMetadata (force = false, resource?: vscode.Uri): Promise<MDCComponentData[] | null> {
+  const folders = vscode.workspace.workspaceFolders ?? []
+  const document = resource ?? vscode.window.activeTextEditor?.document.uri
+  const folder = document?.scheme === 'file' ? vscode.workspace.getWorkspaceFolder(document) : folders.length === 1 ? folders[0] : undefined
+  const scopedResource = document?.scheme === 'file' ? document : folder?.uri
+  const config = vscode.workspace.getConfiguration('mdc', scopedResource)
+  if (!config.get<boolean>('enableComponentMetadataCompletions', false)) { return null }
+  const project = folder && findReactConfig(document?.scheme === 'file' ? document.fsPath : folder.uri.fsPath, folder.uri.fsPath)
+  const url = config.get<string>('componentMetadataURL')
+  const key = JSON.stringify([folder?.uri.toString(), project, url, config.get('componentMetadataLocalFilePattern'), config.get('componentMetadataLocalExcludePattern')])
+  let entry = scopes.get(key)
+  if (!entry) {
+    entry = { metadata: null, lastFile: null, lastFetch: 0, generation: 0, folder, project }
+    scopes.set(key, entry)
+  }
+  if (force) { invalidateEntry(entry); invalidateReactMetadata(project); clearCompletionMetadataCaches() }
+  const ttl = 60 * 1000 * Number(config.get('componentMetadataCacheTTL') || DEFAULT_CACHE_TTL_MINUTES)
+  if (entry.pending) { return entry.pending }
+  if (entry.lastFetch && Date.now() - entry.lastFetch < ttl) { return entry.metadata }
+  const current = entry
+  const generation = entry.generation
+  entry.pending = (async () => {
+    let metadata: MDCComponentData[] | null = null
+    if (url) {
+      current.source = 'url'
+      metadata = await fetchRemoteComponentMetadata(url, force, scopedResource)
+    } else {
+      current.source = 'local'
+      metadata = await fetchLocalComponentMetadata(current, force, scopedResource)
+      if (!metadata && project) {
+        current.source = 'react'
+        try {
+          const started = Date.now()
+          metadata = (await getReactMetadata(project, force)).metadata
+          logger(`React metadata: ${metadata.length} components (${Date.now() - started}ms).`)
+        } catch (error) { logger(`React metadata discovery failed: ${String(error)}`, 'error') }
+      }
     }
-    return null
-  }
-
-  // If completions are disabled, update lastFetch and return
-  if (!componentCompletionsEnabled) {
-    const message = 'MDC: Component metadata suggestions are not enabled.'
-    logger(message)
-    vscode.window.showInformationMessage(message)
-    lastFetch = now // Remember this check even if disabled
-    return null
-  }
-
-  // Clear cache if forcing refresh
-  if (force) {
-    logger('Fetching MDC component metadata and clearing cache...')
-    metadataCache = null
-    lastFetch = 0
-  }
-
-  let metadata: MDCComponentData[] | null = null
-  const componentMetadataURL = config.get<string>('componentMetadataURL')
-
-  // If URL is configured, only use remote metadata
-  if (componentMetadataURL) {
-    logger('Attempting to fetch remote metadata...')
-    metadata = await fetchRemoteComponentMetadata(componentMetadataURL, force)
-  } else {
-    // Only try local metadata if no URL is configured
-    metadata = await fetchLocalComponentMetadata(force)
-  }
-
-  // Always update lastFetch after any attempt
-  lastFetch = now
-
-  if (metadata) {
-    logger('Metadata fetch successful, updating cache.')
-    metadataCache = metadata
+    if (current.generation === generation) {
+      current.metadata = metadata
+      current.lastFetch = Date.now()
+    }
     return metadata
-  }
+  })().finally(() => { if (current.generation === generation) { current.pending = undefined } })
+  return entry.pending
+}
 
-  return null
+function invalidateEntry (entry: MetadataCache): void {
+  entry.generation++
+  entry.metadata = null
+  entry.lastFetch = 0
+  entry.pending = undefined
+}
+
+/** Saved sources and config/metadata files invalidate only their relevant cached scopes. */
+export function registerMetadataWatchers (): vscode.Disposable {
+  function invalidate (uri?: vscode.Uri) {
+    const file = uri && path.normalize(uri.fsPath)
+    const guarded = uri && vscode.workspace.getWorkspaceFolder(uri)
+    const relative = file && guarded ? path.relative(guarded.uri.fsPath, file) : file
+    if (guarded && relative && /(?:^|[\\/])(?:node_modules|\.next|\.git|out|out-test|\.vscode-test)(?:[\\/]|$)/.test(relative)) { return }
+    const supplied = file && [...scopes.values()].some(entry => entry.lastFile === file)
+    const affected = invalidateReactMetadata(file)
+    if (file && !supplied && !affected.size && !/\.(?:[mc]?[jt]sx?|json)$/.test(file)) { return }
+    for (const entry of scopes.values()) {
+      if (!file || (entry.source !== 'url' && (entry.lastFile === file || entry.project && affected.has(entry.project) || entry.folder && file.startsWith(entry.folder.uri.fsPath + path.sep)))) {
+        invalidateEntry(entry)
+      }
+    }
+    clearCompletionMetadataCaches()
+  }
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs,json}')
+  return vscode.Disposable.from(watcher,
+    watcher.onDidChange(invalidate), watcher.onDidCreate(invalidate), watcher.onDidDelete(invalidate),
+    vscode.workspace.onDidSaveTextDocument(document => invalidate(document.uri)),
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('mdc')) { invalidate() } }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => { scopes.clear(); invalidateReactMetadata(); clearCompletionMetadataCaches() })
+  )
 }

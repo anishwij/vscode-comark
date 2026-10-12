@@ -42,7 +42,11 @@ async function main() {
     const extensionsDir = fs.mkdtempSync(path.join(testRoot, 'extensions-'));
     const isolatedArgs = ['--user-data-dir=' + userDataDir, '--extensions-dir=' + extensionsDir];
     const workspaceDir = fs.mkdtempSync(path.join(testRoot, 'workspace-'));
+    fs.cpSync(path.join(extensionDevelopmentPath, 'test/fixtures/react'), workspaceDir, { recursive: true });
+    fs.symlinkSync(path.join(extensionDevelopmentPath, 'node_modules'), path.join(workspaceDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     fs.copyFileSync(path.join(extensionDevelopmentPath, 'test/fixtures/component-metadata.json'), path.join(workspaceDir, 'component-metadata.json'));
+    const workspaceFile = workspaceDir + '.code-workspace';
+    fs.writeFileSync(workspaceFile, JSON.stringify({ folders: [{ path: workspaceDir }], settings: {} }));
     console.log(`✓ VS Code downloaded: ${vscodeExecutablePath}`);
     
     const [cliPath] = resolveCliArgsFromVSCodeExecutablePath(vscodeExecutablePath);
@@ -165,7 +169,7 @@ Close this window when you're done testing!
         vscodeExecutablePath,
         extensionDevelopmentPath: path.join(extensionsDir, installedExtension),
         extensionTestsPath,
-        launchArgs: [workspaceDir, ...isolatedArgs]
+        launchArgs: [workspaceFile, ...isolatedArgs]
       });
       
       console.log('✓ All tests completed successfully');

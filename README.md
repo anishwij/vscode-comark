@@ -155,16 +155,17 @@ Plain inline attribute values are strings. Boolean props that permit `true` can 
 
 Comark's plain attribute parser preserves backslash escapes. String choices therefore preserve raw backslashes and switch quote delimiters when necessary, rather than adding escapes that change the received value. Choices containing both quote types, line breaks, trailing backslashes, or valid JSON object/array text are omitted in attributes because they cannot be represented losslessly with this provider. Use YAML for those values. Dollar signs and other snippet-like text in value choices are inserted literally.
 
-Attribute groups are completed on the current line. Suggestions do not apply to ordinary Markdown element attributes, code spans (including multiline spans), fenced code, YAML, comments, or escaped component markers. This does not add inline component-name completion or source-code metadata discovery.
+Attribute groups are completed on the current line. Suggestions do not apply to ordinary Markdown element attributes, code spans (including multiline spans), fenced code, YAML, comments, or escaped component markers. This does not add inline component-name completion.
 
 To enable component name and prop suggestions, enable the `mdc.enableComponentMetadataCompletions` setting in in VS Code, and configure the other settings as described below depending on your preferred component metadata source.
 
-The extension supports two methods for providing component metadata:
+The extension supports three methods for providing component metadata:
 
 - Local component metadata provided by the `nuxt-component-meta` module, or a static JSON file in your project.
 - Remote component metadata provided by an API endpoint that returns JSON data.
+- Automatic discovery of statically registered React components in a TypeScript project when no configured local metadata is found and no metadata URL is set.
 
-Regardless of the method you choose, the data source **must** match one of the following formats:
+For local files and remote endpoints, the data source **must** match one of the following formats:
 
 1. The default format used by `nuxt-component-meta`
 
@@ -198,6 +199,37 @@ Regardless of the method you choose, the data source **must** match one of the f
 
     type MDCMetadataResponse = MDCComponentData[]
     ```
+
+#### React/TypeScript source discovery
+
+Enable the existing completion setting in your project's `.vscode/settings.json`:
+
+```json
+{
+  "mdc.enableComponentMetadataCompletions": true
+}
+```
+
+The extension uses the Markdown file's closest `tsconfig.json` within its workspace folder. It follows project references with each project's own compiler options, including path aliases. Components must be registered through a statically readable `components` map on an imported `@comark/react` renderer (`Markdown`, `MarkdownDocument`, `MarkdownLive`, or `MarkdownClient`), or in the options passed to `defineMarkdownComponent` / `defineMarkdownDocumentComponent`:
+
+```tsx
+import { Markdown } from '@comark/react'
+import { Card } from './components/card'
+
+const components = { card: Card }
+
+export function Article() {
+  return <Markdown value={'::card{variant="outline"}'} components={components} />
+}
+```
+
+Discovered Markdown names follow Comark's tag normalization and React lookup order: `ProseCard`, then `Card`, then `card` for `::card`. A map containing `{ Card }` therefore supplies `::card`; keys such as `fooBar` are omitted when the renderer cannot resolve their normalized tags. Imported maps, constant aliases, and static object spreads are supported. React prop suggestions preserve exact keys such as `className` and `titleText`; their kebab-case spellings remain different props. The TypeScript checker supplies types, required flags, documentation, and finite literal choices, including inherited props and `VariantProps<typeof cardVariants>` from CVA. `children` supplies the default slot; `slotHeader` supplies the `header` slot.
+
+Discovery reads saved files and never runs project code or TypeScript plugins. Analysis is lazy, cached per project, and refreshed after relevant saved source/configuration changes. Use `MDC: Refresh component metadata` for a manual refresh. The extension includes its pinned TypeScript compiler and standard library declarations.
+
+Dynamic maps, mutable registrations, class components, overloaded call signatures, and unresolved generic props are outside this discovery scope. Wrappers are supported only when their resulting callable type exposes concrete props; arbitrary HOC inference is not guaranteed. Conflicting registrations for the same name are omitted. Unsaved source changes are not analyzed, and unrestricted types have no enumerated value choices.
+
+Metadata settings are scoped to the document's workspace folder. A configured URL remains authoritative, including when fetching it fails; otherwise configured local JSON/Nuxt metadata takes precedence over React discovery. Source-discovered props use the same YAML and attribute completion rules described above.
 
 #### Local component metadata
 

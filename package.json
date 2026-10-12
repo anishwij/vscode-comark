@@ -156,27 +156,32 @@
         "mdc.enableComponentMetadataCompletions": {
           "type": "boolean",
           "default": false,
-          "description": "Enable MDC component name and prop auto-completions."
+          "description": "Enable MDC component name and prop auto-completions.",
+          "scope": "resource"
         },
         "mdc.componentMetadataLocalFilePattern": {
           "type": "string",
           "default": "**/.nuxt/component-meta.mjs",
-          "description": "A glob pattern to the local MDC component metadata. Defaults to: `**/.nuxt/component-meta.mjs`"
+          "description": "A glob pattern to the local MDC component metadata. Defaults to: `**/.nuxt/component-meta.mjs`",
+          "scope": "resource"
         },
         "mdc.componentMetadataLocalExcludePattern": {
           "type": "string",
           "default": "{**/node_modules/**,**/dist/**,**/.output/**,**/.cache/**,**/.playground/**}",
-          "description": "A glob pattern to exclude directories from the local MDC component metadata search. Defaults to: `{**/node_modules/**,**/dist/**,**/.output/**,**/.cache/**,**/.playground/**}`"
+          "description": "A glob pattern to exclude directories from the local MDC component metadata search. Defaults to: `{**/node_modules/**,**/dist/**,**/.output/**,**/.cache/**,**/.playground/**}`",
+          "scope": "resource"
         },
         "mdc.componentMetadataURL": {
           "type": "string",
           "default": "",
-          "description": "A remote or localhost URL from which to fetch the MDC completion metadata. The endpoint must return valid JSON that matches one of the documented response interfaces. When set, will take precedence over the `mdc.componentMetadataLocalFilePattern` configuration."
+          "description": "A remote or localhost URL from which to fetch the MDC completion metadata. The endpoint must return valid JSON that matches one of the documented response interfaces. When set, will take precedence over the `mdc.componentMetadataLocalFilePattern` configuration.",
+          "scope": "resource"
         },
         "mdc.componentMetadataCacheTTL": {
           "type": "number",
           "default": 360,
-          "description": "The number of minutes to cache the MDC metadata. Defaults to 30 minutes."
+          "description": "The number of minutes to cache the MDC metadata. Defaults to 30 minutes.",
+          "scope": "resource"
         },
         "mdc.debug": {
           "type": "boolean",
@@ -225,12 +230,12 @@
     "@types/vscode": "1.42.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^2.32.0",
+    "class-variance-authority": "0.7.1",
     "esno": "^4.8.0",
     "glob": "^13.0.6",
     "mocha": "^11.7.6",
     "oxlint": "^1.70.0",
     "release-it": "^20.2.0",
-    "typescript": "6.0.3",
     "vitest": "^4.1.9",
     "vscode-textmate": "^9.3.2",
     "vue-component-meta": "^3.3.5"
@@ -238,6 +243,7 @@
   "dependencies": {
     "@nuxtlabs/monarch-mdc": "^0.9.0",
     "scule": "^1.3.0",
+    "typescript": "6.0.3",
     "vscode-textmate": "^9.3.2"
   },
   "release-it": {
