@@ -4,7 +4,10 @@ import * as vscode from 'vscode'
 import type { ComponentMeta } from 'vue-component-meta'
 import type { Component } from '@nuxt/schema'
 import { logger } from './logger'
-import { getComponentYamlContext, isInsideYamlScalar, getPropLiteralValues, getYamlValuePosition, formatYamlLiteral } from './utils/yaml-props'
+import { getComponentYamlContext } from './utils/document'
+import { getPropLiteralValues } from './utils/prop-literals'
+import { isInsideYamlScalar, getYamlValuePosition, formatYamlLiteral } from './utils/yaml-props'
+import { getAttributeContext, formatAttributeString, type AttributeContext } from './utils/attribute-props'
 
 type MDCComponentMeta = Omit<Component, 'filePath' | 'shortPath'> & {
   meta: ComponentMeta
@@ -485,6 +488,10 @@ export function getMdcComponentPropCompletionItemProvider (componentData: MDCCom
   const textUntilPosition = lineContent.slice(0, position.character)
 
   const lines = getModelLines(document)
+  const attributes = getAttributeContext(lines, position.line, position.character)
+  if (attributes) {
+    return getAttributePropCompletions(componentData, attributes, lineContent, position)
+  }
   const context = getComponentYamlContext(lines, position.line)
   if (!context || isInsideYamlScalar(lines, position.line, context.start)) { return }
 
@@ -597,6 +604,66 @@ export function getMdcComponentPropCompletionItemProvider (componentData: MDCCom
   }
 
   return Array.from(suggestionsByComponent.values()).flat()
+}
+
+function getAttributePropCompletions (
+  componentData: MDCComponentData[],
+  context: AttributeContext,
+  line: string,
+  position: vscode.Position
+): vscode.CompletionItem[] | undefined {
+  const component = componentData.find(component => component.mdc_name === context.component)
+  const props = component?.component_meta?.meta?.props
+  if (!props) { return }
+  const range = new vscode.Range(position.line, context.start, position.line, context.end)
+  const docs = getComponentDocsLink(component)
+  if (context.mode === 'value') {
+    // Bound expressions and typed literals are distinct from plain string attributes.
+    if (context.bound) { return }
+    const prop = props.find(prop => prop.name === context.prop || kebabCase(prop.name) === context.prop || camelCase(prop.name) === context.prop)
+    if (!prop) { return }
+    return getPropLiteralValues(prop).filter((value): value is string => typeof value === 'string').flatMap(value => {
+      const insertText = formatAttributeString(value, context.quote)
+      if (insertText === undefined) { return [] }
+      return [{
+        label: JSON.stringify(value),
+        kind: vscode.CompletionItemKind.EnumMember,
+        range,
+        filterText: context.quote ? context.quote + value : value,
+        insertText,
+        detail: prop.type,
+        documentation: new vscode.MarkdownString([prop.description, docs].filter(Boolean).join('\n\n'))
+      }]
+    })
+  }
+
+  const existing = new Set(context.existing.flatMap(name => [kebabCase(name), camelCase(name)]))
+  return props.filter(prop => !existing.has(kebabCase(prop.name)) && !existing.has(camelCase(prop.name))).map((prop): vscode.CompletionItem => {
+    const { kebab, camel } = getCachedPropNames(context.component, prop.name)
+    const values = getPropLiteralValues(prop)
+    const boolean = values.includes(true) && values.every(value => typeof value === 'boolean')
+    const string = (values.length > 0 && values.every(value => typeof value === 'string'))
+      || prop.schema === 'string' || /^string(?:\s*\|\s*(?:undefined|null))*$/.test(prop.type ?? '')
+    const snippetName = kebab.replace(/[\\$}]/g, '\\$&')
+    let insert = snippetName
+    if (!context.hasValue && !boolean) {
+      // Non-string props get an explicit binding snippet, never a quoted numeric/boolean value.
+      insert = (!string && !context.bound ? ':' : '') + snippetName + '="${0:}"'
+    }
+    if (!context.prop && context.start > 0 && !/[\s{:]/.test(line[context.start - 1])) { insert = ' ' + insert }
+    return {
+      // @ts-ignore - CompletionItemLabel is available since VS Code 1.75, but these typings predate it.
+      label: { label: kebab, description: prop.type?.replace('| undefined', '').replace('| null', ''), detail: prop.required ? ' (required)' : undefined },
+      kind: vscode.CompletionItemKind.Property,
+      range,
+      filterText: `${kebab} ${camel}`,
+      sortText: prop.required ? '_' + kebab : kebab,
+      insertText: new vscode.SnippetString(insert),
+      detail: prop.description,
+      documentation: new vscode.MarkdownString(docs),
+      command: { command: 'editor.action.triggerSuggest', title: 'Trigger Suggestions' }
+    }
+  })
 }
 
 /**

@@ -135,7 +135,27 @@ Card content.
 
 Value suggestions use the structured schemas from `nuxt-component-meta` / `vue-component-meta`, or simple literal-union type strings in custom JSON metadata. Press `Ctrl+Space` to request suggestions manually. Existing quotes are preserved for strings; numeric and boolean choices are inserted as YAML numbers and booleans. String choices such as `"true"` remain quoted strings.
 
-This is completion, not validation. Unrestricted strings/numbers and unresolved type aliases have no enumerated choices. Nested object **key** suggestions remain available, but nested values, arrays/objects, binding expressions, document frontmatter, and inline attribute completion are outside this value provider's scope. After editing metadata, run `MDC: Refresh component metadata` to load the new choices.
+This is completion, not validation. Unrestricted strings/numbers and unresolved type aliases have no enumerated choices. Nested object **key** suggestions remain available, but nested values, arrays/objects, binding expressions, and document frontmatter are outside the value provider's scope. After editing metadata, run `MDC: Refresh component metadata` to load the new choices.
+
+### Component attribute suggestions
+
+The same metadata supplies property names and string-literal choices inside component attributes, on block components (`::card`), nested blocks (`:::card`), and inline components in prose (`:badge[New]`). For example:
+
+```mdc
+::card{variant="outline"}
+Card content.
+::
+
+Status: :badge[New]{variant="success"}.
+```
+
+Type `{v` to suggest `variant`, or request completion after `variant="o` to suggest `outline`. Accepting a string property inserts a quoted value placeholder and re-triggers suggestions. Existing values are preserved when editing a property name, and attributes already used on that component are omitted from name suggestions, including equivalent camel/kebab names and bound forms.
+
+Plain inline attribute values are strings. Boolean props that permit `true` can use shorthand such as `{enabled}`. Other non-string props use an explicit `:prop=""` binding placeholder; bound values and binding paths have no ordinary enum suggestions. Numeric and boolean value choices remain available in component YAML.
+
+Comark's plain attribute parser preserves backslash escapes. String choices therefore preserve raw backslashes and switch quote delimiters when necessary, rather than adding escapes that change the received value. Choices containing both quote types, line breaks, trailing backslashes, or valid JSON object/array text are omitted in attributes because they cannot be represented losslessly with this provider. Use YAML for those values. Dollar signs and other snippet-like text in value choices are inserted literally.
+
+Attribute groups are completed on the current line. Suggestions do not apply to ordinary Markdown element attributes, code spans (including multiline spans), fenced code, YAML, comments, or escaped component markers. This does not add inline component-name completion or source-code metadata discovery.
 
 To enable component name and prop suggestions, enable the `mdc.enableComponentMetadataCompletions` setting in in VS Code, and configure the other settings as described below depending on your preferred component metadata source.
 

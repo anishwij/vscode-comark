@@ -217,7 +217,7 @@ export function activate (context: vscode.ExtensionContext) {
           },
           '\n', // Trigger newline
           ' ', // Trigger on space character
-          ':', '"', "'" // Trigger when starting a YAML value
+          ':', '"', "'", '{', '=' // Trigger YAML values and component attributes
           )
 
           // Add to subscriptions for cleanup on deactivate

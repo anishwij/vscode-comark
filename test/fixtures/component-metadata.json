@@ -135,6 +135,49 @@
             },
             "tags": [],
             "global": false
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "schema": "string",
+            "description": "The card title.",
+            "required": false,
+            "tags": []
+          },
+          {
+            "name": "special",
+            "type": "SpecialValue",
+            "schema": {
+              "kind": "enum",
+              "schema": [
+                "\"say \\\"hello\\\"\"",
+                "\"can't\"",
+                "\"a\\\\b\"",
+                "\"space | {braces} $1 ${0} }\"",
+                "\"{braces}\"",
+                "\"both ' and \\\"\"",
+                "\"trailing\\\\\"",
+                "\"line\\nbreak\"",
+                "\"{\\\"a\\\":1}\""
+              ]
+            },
+            "description": "Literal strings used to exercise safe insertion.",
+            "required": false,
+            "tags": []
+          },
+          {
+            "name": "falseOnly",
+            "type": "false | undefined",
+            "schema": {
+              "kind": "enum",
+              "schema": [
+                "false",
+                "undefined"
+              ]
+            },
+            "description": "A boolean literal that cannot be true.",
+            "required": false,
+            "tags": []
           }
         ],
         "slots": [],
@@ -154,6 +197,47 @@
             "type": "\"info\" | \"warning\"",
             "description": "Alert appearance.",
             "required": false,
+            "tags": []
+          }
+        ],
+        "slots": [],
+        "events": [],
+        "exposed": []
+      }
+    }
+  },
+  {
+    "mdc_name": "badge",
+    "component_meta": {
+      "meta": {
+        "type": 2,
+        "props": [
+          {
+            "name": "variant",
+            "type": "\"success\" | \"danger\"",
+            "description": "Badge tone.",
+            "required": false,
+            "tags": []
+          }
+        ],
+        "slots": [],
+        "events": [],
+        "exposed": []
+      }
+    }
+  },
+  {
+    "mdc_name": "tooltip",
+    "component_meta": {
+      "meta": {
+        "type": 2,
+        "props": [
+          {
+            "name": "text",
+            "type": "string",
+            "schema": "string",
+            "description": "Tooltip text.",
+            "required": true,
             "tags": []
           }
         ],

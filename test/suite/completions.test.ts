@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-suite('Component YAML completions', function () {
+suite('Component prop completions', function () {
   this.timeout(10000);
   let metadataUri: vscode.Uri;
   let originalMetadata: Uint8Array;
@@ -44,6 +44,15 @@ suite('Component YAML completions', function () {
     for (const marker of ['```', '~~~yaml [props]']) {
       const source = `    ${marker}\n\n::card\n---\nvariant: o¦ # note\n---\n::`;
       assert.strictEqual(await accept(source, '"outline"'), source.replace('o¦', '"outline"'));
+    }
+  });
+
+  test('applies inline component prop and value edits inside rendered Markdown wrappers', async () => {
+    for (const wrap of ['[See $](url)', '[A $]{.span}', '**$**', '_$_']) {
+      const name = wrap.replace('$', ':badge[New]{v¦}');
+      assert.strictEqual(await accept(name, 'variant', vscode.CompletionItemKind.Property), wrap.replace('$', ':badge[New]{variant=""}'));
+      const value = wrap.replace('$', ':badge[New]{variant="s¦"}');
+      assert.strictEqual(await accept(value, '"success"'), wrap.replace('$', ':badge[New]{variant="success"}'));
     }
   });
 
@@ -177,6 +186,120 @@ suite('Component YAML completions', function () {
       '::card\n---\nvariant: outline # ¦\n---\n::',
     ];
     for (const content of cases) { assert.deepStrictEqual(values((await request(content)).items), [], content); }
+  });
+
+  test('completes block and inline property names with usable snippets', async () => {
+    const cases = [
+      ['::card{v¦}', 'variant', '::card{variant=""}'],
+      [':::card{v¦}', 'variant', ':::card{variant=""}'],
+      ['::::card{v¦', 'variant', '::::card{variant=""'],
+      ['::card{¦', 'variant', '::card{variant=""'],
+      ['Text :badge[New]{v¦}', 'variant', 'Text :badge[New]{variant=""}'],
+      ['Text :tooltip{t¦}', 'text', 'Text :tooltip{text=""}'],
+      ['Text :badge{variant="success"} and :tooltip{t¦}', 'text', 'Text :badge{variant="success"} and :tooltip{text=""}'],
+      ['::card{en¦}', 'enabled', '::card{enabled}'],
+      ['::card{co¦}', 'count', '::card{:count=""}'],
+      ['::card{false-o¦}', 'false-only', '::card{:false-only=""}'],
+      ['::card{:v¦}', 'variant', '::card{:variant=""}'],
+      ['::card{variant="outline"¦}', 'title', '::card{variant="outline" title=""}'],
+    ];
+    for (const [source, name, expected] of cases) {
+      assert.strictEqual(await accept(source, name, vscode.CompletionItemKind.Property), expected);
+    }
+  });
+
+  test('re-triggers string choices at the inserted property snippet position', async () => {
+    const result = await request('::card{v¦}');
+    const variant = result.items.find(item => label(item) === 'variant')!;
+    assert.ok(variant.insertText instanceof vscode.SnippetString);
+    assert.ok(variant.range instanceof vscode.Range && variant.range.contains(result.position));
+    assert.strictEqual(variant.command?.command, 'editor.action.triggerSuggest');
+    assert.strictEqual((variant.label as unknown as { detail: string }).detail, ' (required)');
+    const editor = await vscode.window.showTextDocument(result.document);
+    await editor.insertSnippet(variant.insertText, variant.range);
+    await vscode.commands.executeCommand(variant.command!.command);
+    const choices = await vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', result.document.uri, editor.selection.active);
+    assert.deepStrictEqual(values(choices?.items ?? []), ['"default"', '"muted"', '"outline"']);
+    await vscode.commands.executeCommand('hideSuggestWidget');
+  });
+
+  test('inserts inline values without changing surrounding attributes or text', async () => {
+    const cases = [
+      ['::card{variant="o¦"}', '::card{variant="outline"}'],
+      ["::card{variant='o¦'}", "::card{variant='outline'}"],
+      ['::card{variant=o¦}', '::card{variant="outline"}'],
+      ['::card{variant="o¦', '::card{variant="outline"'],
+      ['::card{variant="¦}', '::card{variant="outline"}'],
+      ["::card{variant='o¦}", "::card{variant='outline'}"],
+      ['::card{variant="ou¦tline" title="Keep"} after', '::card{variant="outline" title="Keep"} after'],
+      ['::card{variant=¦  }', '::card{variant="outline"}'],
+      ['::card{variant=¦ title="Keep"}', '::card{variant="outline" title="Keep"}'],
+      ['::card{variant= ¦ title="Keep"}', '::card{variant="outline" title="Keep"}'],
+    ];
+    for (const [source, expected] of cases) { assert.strictEqual(await accept(source, '"outline"'), expected); }
+    assert.strictEqual(await accept('Text :badge[New]{variant="da¦"} after', '"danger"'), 'Text :badge[New]{variant="danger"} after');
+    const badge = await request('Text :tooltip{text="Keep"} and :badge[New]{variant="¦"}');
+    assert.deepStrictEqual(values(badge.items), ['"danger"', '"success"']);
+    for (const trigger of ['{', '=', '"', "'"]) {
+      assert.ok((await request('::card{variant="¦"}', trigger)).items.some(item => label(item) === '"outline"'));
+    }
+  });
+
+  test('suppresses duplicate attributes but allows current-key edits and preserves bindings', async () => {
+    for (const source of ['::card{variant="outline" ¦}', '::card{:variant="data.choice" ¦}', '::card{longVariant="wide" ¦}']) {
+      const result = await request(source);
+      const duplicate = source.includes('longVariant') ? 'long-variant' : 'variant';
+      assert.ok(!result.items.some(item => label(item) === duplicate && item.kind === vscode.CompletionItemKind.Property));
+    }
+    assert.strictEqual(await accept('::card{long-var¦iant="wide" title="Keep"}', 'long-variant', vscode.CompletionItemKind.Property), '::card{long-variant="wide" title="Keep"}');
+    assert.strictEqual(await accept('::card{:var¦iant="data.choice"}', 'variant', vscode.CompletionItemKind.Property), '::card{:variant="data.choice"}');
+    assert.strictEqual(await accept(`::card{:options={text:'}'} v¦}`, 'variant', vscode.CompletionItemKind.Property), `::card{:options={text:'}'} variant=""}`);
+    for (const source of ['::card{:variant="data.¦"}', '::card{:options={text:":badge{v¦}"}}', '::card{enabled="¦"}', '::card{count="¦"}', '::card{text="¦"}', '::unknown{variant="¦"}']) {
+      assert.deepStrictEqual(values((await request(source)).items), []);
+    }
+  });
+
+  test('inserts special string literals as plain text and omits lossy representations', async () => {
+    const fixtures = JSON.parse(new TextDecoder().decode(originalMetadata));
+    const special = fixtures[0].component_meta.meta.props.find((prop: { name: string }) => prop.name === 'special');
+    const safe = special.schema.schema.slice(0, 5).map((literal: string) => JSON.parse(literal));
+    const result = await request('::card{special="¦" title="Keep"}');
+    assert.deepStrictEqual(values(result.items), safe.map((value: string) => JSON.stringify(value)).sort());
+    for (const value of safe) {
+      const quote = value.includes('"') ? "'" : '"';
+      const output = await accept('::card{special="¦" title="Keep"}', JSON.stringify(value));
+      assert.strictEqual(output, `::card{special=${quote}${value}${quote} title="Keep"}`);
+    }
+    assert.strictEqual(await accept("::card{special='¦'}", JSON.stringify("can't")), '::card{special="can\'t"}');
+  });
+
+  test('excludes native attributes, code, YAML, comments, escaped syntax and unrelated colons', async () => {
+    const sources = [
+      '[Span]{v¦}', '[Link](url){v¦}', '![Image](image.png){v¦}',
+      '`::card{v¦}`', 'Text `code\n:badge[New]{v¦}\nend`',
+      '```md\n::card{v¦}\n```', '<!-- ::card{v¦} -->', '<!--\n:badge{v¦}\n-->',
+      '---\ntitle: :badge{v¦}\n---', '::card\n---\ntitle: :badge{v¦}\n---\n::',
+      '::card\n```yaml [props]\ntitle: :badge{v¦}\n```\n::',
+      String.raw`\::card{v¦}`, String.raw`Text \:badge{v¦}`, 'http://card{v¦}',
+    ];
+    for (const source of sources) {
+      const result = await request(source);
+      assert.ok(!result.items.some(item => item.kind === vscode.CompletionItemKind.Property || item.kind === vscode.CompletionItemKind.EnumMember), source);
+    }
+    const resumed = await request('Text `code\nend` :badge[New]{variant="¦"}');
+    assert.deepStrictEqual(values(resumed.items), ['"danger"', '"success"']);
+  });
+
+  test('preserves existing component-name filtering and replacement behavior', async () => {
+    const source = '::ca¦rd\n---\nvariant: outline\n---\n::';
+    const result = await request(source);
+    const card = result.items.find(item => label(item) === 'card' && item.kind === vscode.CompletionItemKind.Function)!;
+    assert.ok(card);
+    assert.ok(card.range instanceof vscode.Range && card.range.contains(result.position));
+    const editor = await vscode.window.showTextDocument(result.document);
+    assert.ok(card.insertText instanceof vscode.SnippetString);
+    await editor.insertSnippet(card.insertText, card.range);
+    assert.strictEqual(result.document.getText(), source.replace('¦', ''));
   });
 
   test('reads changed choices after the existing metadata refresh command', async () => {
