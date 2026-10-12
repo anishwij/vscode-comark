@@ -120,6 +120,23 @@ The extension can provide intelligent auto-completion for MDC block components a
 
 When typing a colon (`:`) in your MDC document, the extension will suggest available component names. Within MDC component YAML front matter sections (between `---`), the extension provides contextual prop suggestions (including nested props) with types and documentation where provided.
 
+Component props can also be written in a fenced `yaml [props]` block. Both styles must appear at the beginning of the component content, before body text or slots. YAML props may override attributes on the opening component tag.
+
+For top-level scalar props, the extension suggests known string and numeric literal values and boolean values. For example, metadata describing `variant` as `"default" | "outline" | "muted"` supplies those choices after `variant:`:
+
+```mdc
+::card
+---
+variant: "outline"
+---
+Card content.
+::
+```
+
+Value suggestions use the structured schemas from `nuxt-component-meta` / `vue-component-meta`, or simple literal-union type strings in custom JSON metadata. Press `Ctrl+Space` to request suggestions manually. Existing quotes are preserved for strings; numeric and boolean choices are inserted as YAML numbers and booleans. String choices such as `"true"` remain quoted strings.
+
+This is completion, not validation. Unrestricted strings/numbers and unresolved type aliases have no enumerated choices. Nested object **key** suggestions remain available, but nested values, arrays/objects, binding expressions, document frontmatter, and inline attribute completion are outside this value provider's scope. After editing metadata, run `MDC: Refresh component metadata` to load the new choices.
+
 To enable component name and prop suggestions, enable the `mdc.enableComponentMetadataCompletions` setting in in VS Code, and configure the other settings as described below depending on your preferred component metadata source.
 
 The extension supports two methods for providing component metadata:

@@ -31,10 +31,22 @@ async function main() {
       console.log('   Close the VS Code window when you\'re done testing');
     }
     
-    const vscodeExecutablePath = await downloadAndUnzipVSCode();
+    let vscodeExecutablePath = await downloadAndUnzipVSCode();
+    // Recent macOS builds use Code rather than Electron as their executable name.
+    if (!fs.existsSync(vscodeExecutablePath) && process.platform === 'darwin') {
+      const codePath = path.join(path.dirname(vscodeExecutablePath), 'Code');
+      if (fs.existsSync(codePath)) { vscodeExecutablePath = codePath; }
+    }
+    const testRoot = path.resolve(extensionDevelopmentPath, '.vscode-test');
+    const userDataDir = fs.mkdtempSync(path.join(testRoot, 'user-data-'));
+    const extensionsDir = fs.mkdtempSync(path.join(testRoot, 'extensions-'));
+    const isolatedArgs = ['--user-data-dir=' + userDataDir, '--extensions-dir=' + extensionsDir];
+    const workspaceDir = fs.mkdtempSync(path.join(testRoot, 'workspace-'));
+    fs.copyFileSync(path.join(extensionDevelopmentPath, 'test/fixtures/component-metadata.json'), path.join(workspaceDir, 'component-metadata.json'));
     console.log(`✓ VS Code downloaded: ${vscodeExecutablePath}`);
     
-    const [cliPath, ...args] = resolveCliArgsFromVSCodeExecutablePath(vscodeExecutablePath);
+    const [cliPath] = resolveCliArgsFromVSCodeExecutablePath(vscodeExecutablePath);
+    const args = isolatedArgs;
 
     console.log(`🔧 Installing extension from VSIX...`);
     console.log(`   Command: ${cliPath} ${[...args, '--install-extension', vsixPath].join(' ')}`);
@@ -72,7 +84,7 @@ async function main() {
       }
     );
 
-    if (listResult.stdout && listResult.stdout.includes('Nuxt.mdc')) {
+    if (listResult.stdout && listResult.stdout.toLowerCase().includes('nuxt.mdc')) {
       console.log('✓ Extension "Nuxt.mdc" confirmed in installed extensions');
     } else {
       console.warn('⚠️  Warning: Extension "Nuxt.mdc" not found in extension list');
@@ -119,6 +131,7 @@ Close this window when you're done testing!
       
       // Launch VS Code with the sample file and wait for it to close
       const launchArgs = [
+        ...isolatedArgs,
         '--extensionDevelopmentPath=' + extensionDevelopmentPath,
         sampleMdcPath,
         '--wait' // This makes the process wait until the window is closed
@@ -146,10 +159,13 @@ Close this window when you're done testing!
     } else {
       // Run the automated extension tests
       console.log('🧪 Running extension tests...');
+      const installedExtension = fs.readdirSync(extensionsDir).find(name => name.toLowerCase().startsWith('nuxt.mdc-'));
+      if (!installedExtension) { throw new Error('The packaged MDC extension was not installed'); }
       await runTests({
         vscodeExecutablePath,
-        extensionDevelopmentPath,
-        extensionTestsPath
+        extensionDevelopmentPath: path.join(extensionsDir, installedExtension),
+        extensionTestsPath,
+        launchArgs: [workspaceDir, ...isolatedArgs]
       });
       
       console.log('✓ All tests completed successfully');

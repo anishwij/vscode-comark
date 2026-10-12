@@ -4,6 +4,7 @@ import * as vscode from 'vscode'
 import type { ComponentMeta } from 'vue-component-meta'
 import type { Component } from '@nuxt/schema'
 import { logger } from './logger'
+import { getComponentYamlContext, isInsideYamlScalar, getPropLiteralValues, getYamlValuePosition, formatYamlLiteral } from './utils/yaml-props'
 
 type MDCComponentMeta = Omit<Component, 'filePath' | 'shortPath'> & {
   meta: ComponentMeta
@@ -36,9 +37,6 @@ interface MdcCompletionItemProviderConfig {
   document: vscode.TextDocument
   position: vscode.Position
 }
-
-const MDC_COMPONENT_START_REGEX = /^\s*:{2,}([\w-]+)\s*$/
-const MULTILINE_STRING_REGEX = /^([\w-]+):\s*[|>]/g
 
 /** Cache for storing model line content to avoid repeated getLinesContent() calls */
 const lineContentCache = new WeakMap<vscode.TextDocument, string[]>()
@@ -171,40 +169,6 @@ function getPropValueType (component: MDCComponentData, prop: any): MdcPropType 
 }
 
 /**
- * Determines if the current position is inside a MDC block component.
- *
- * @param {vscode.TextDocument} document - The VS Code text document.
- * @param {number} lineNumber - The 1-based line number of the current cursor position.
- * @returns {boolean} - True if inside a MDC block component, false otherwise.
- */
-function isInsideMDCComponent (document: vscode.TextDocument, lineNumber: number): boolean {
-  const lines = getModelLines(document)
-  const componentStack: string[] = []
-
-  for (let i = 0; i < lineNumber; i++) {
-    const line = lines?.[i]?.trim()
-    if (!line) {
-      continue
-    }
-
-    // Check for component start
-    const startMatch = line.match(MDC_COMPONENT_START_REGEX)
-    if (startMatch) {
-      componentStack.push(startMatch[1])
-      continue
-    }
-
-    // Check for component end
-    if (line === '::') {
-      componentStack.pop()
-    }
-  }
-
-  // If stack has any components, we're inside at least one MDC component
-  return componentStack.length > 0
-}
-
-/**
  * Determines if the current position is inside a YAML block.
  *
  * @param {vscode.TextDocument} document - The VS Code text document.
@@ -257,94 +221,12 @@ function isInsideCodeBlock (document: vscode.TextDocument, lineNumber: number): 
 }
 
 /**
- * Determines if the current position is inside a YAML multiline string.
- * Returns false when cursor returns to the same indentation level as the multiline property.
- *
- * @param {vscode.TextDocument} document - The VS Code text document.
- * @param {number} lineNumber - The 1-based line number of the current cursor position.
- * @returns {boolean} - True if inside a YAML multiline string, false otherwise.
- */
-function isInsideYAMLMultilineString (document: vscode.TextDocument, lineNumber: number): boolean {
-  const lines = getModelLines(document)
-  const currentLine = lines[lineNumber - 1]
-  const currentIndentation = currentLine.length - currentLine.trimStart().length
-  let multilineStartIndentation: number | null = null
-
-  // Work backwards from current line to find the last multiline string start
-  for (let i = lineNumber - 1; i >= 0; i--) {
-    const line = lines[i]
-    const trimmedLine = line.trim()
-    const lineIndentation = line.length - line.trimStart().length
-
-    // If we find a YAML marker (---) before a multiline marker, we're not in a multiline string
-    if (trimmedLine === '---') {
-      return false
-    }
-
-    // Check for multiline string start
-    MULTILINE_STRING_REGEX.lastIndex = 0
-    if (MULTILINE_STRING_REGEX.test(trimmedLine)) {
-      multilineStartIndentation = lineIndentation
-      break
-    }
-  }
-
-  // If we didn't find a multiline string start, or we're at the same indentation level
-  // as the multiline property, we're not inside the multiline string
-  if (multilineStartIndentation === null || currentIndentation <= multilineStartIndentation) {
-    return false
-  }
-
-  return true
-}
-
-/**
  * Generates a string representing slot content.
  */
 function getSlotContent (cursorIndex?: number): string {
   const placeholderText = '<!-- Slot content -->'
   // Two spaces before the content to auto-indent
   return typeof cursorIndex === 'number' ? '\n${' + cursorIndex + ':' + placeholderText + '}' : `\n${placeholderText}`
-}
-
-/**
- * Retrieves the name of the current MDC component at a given line number in a VS Code text document.
- *
- * This function scans through the lines of the provided text document up to the specified line number,
- * maintaining a stack of component names to determine the current nesting level of MDC components.
- *
- * @param {vscode.TextDocument} document - The VS Code text document.
- * @param {number} lineNumber - The 1-based line number of the current cursor position.
- * @returns {string} - The name of the current MDC component at the specified line number, or `undefined` if no component is found.
- */
-function getCurrentMDCComponentName (document: vscode.TextDocument, lineNumber: number): string | undefined {
-  const lines = getModelLines(document)
-  const componentStack: Array<{ name: string, line: number }> = []
-
-  // Scan through lines up to current position
-  for (let i = 0; i < lineNumber; i++) {
-    const line = lines?.[i]?.trim()
-    if (!line) {
-      continue
-    }
-
-    // Check for component start
-    const startMatch = line.match(MDC_COMPONENT_START_REGEX)
-    if (startMatch) {
-      componentStack.push({ name: startMatch[1], line: i })
-      continue
-    }
-
-    // Check for component end
-    if (line === '::') {
-      componentStack.pop()
-    }
-  }
-
-  // Get the most recently added component (last item in stack)
-  // This will be the innermost component at the cursor position
-  const currentComponent = componentStack[componentStack.length - 1]
-  return currentComponent?.name
 }
 
 /**
@@ -380,35 +262,14 @@ function getYAMLBlockBoundaries (document: vscode.TextDocument, lineNumber: numb
     documentCache = new Map()
     yamlBlockBoundaryCache.set(document, documentCache)
   }
-
   let boundaries = documentCache.get(lineNumber)
   if (!boundaries) {
-    const lines = getModelLines(document)
-    let blockStart = -1
-    let blockEnd = lines.length
-
-    // Find start of current YAML block
-    for (let i = lineNumber - 1; i >= 0; i--) {
-      if (lines[i].trim() === '---') {
-        blockStart = i
-        break
-      }
-    }
-
-    // Find end of current YAML block
-    for (let i = lineNumber; i < lines.length; i++) {
-      if (lines[i].trim() === '---') {
-        blockEnd = i
-        break
-      }
-    }
-
-    if (blockStart !== -1) {
-      boundaries = { start: blockStart, end: blockEnd }
+    const context = getComponentYamlContext(getModelLines(document), lineNumber)
+    if (context) {
+      boundaries = { start: context.start, end: context.end }
       documentCache.set(lineNumber, boundaries)
     }
   }
-
   return boundaries
 }
 
@@ -462,13 +323,14 @@ function getCurrentYAMLPath (document: vscode.TextDocument, lineNumber: number):
 function getCurrentYAMLBlockProps (document: vscode.TextDocument, lineNumber: number): Set<string> {
   const lines = getModelLines(document)
   const existingProps = new Set<string>()
-  const currentIndentation = lines[lineNumber - 1].length - lines[lineNumber - 1].trimStart().length
+  const currentIndentation = lines[lineNumber].length - lines[lineNumber].trimStart().length
 
   const boundaries = getYAMLBlockBoundaries(document, lineNumber)
   if (!boundaries) { return existingProps }
 
   // Extract props at the same indentation level from the current YAML block
   for (let i = boundaries.start + 1; i < boundaries.end; i++) {
+    if (i === lineNumber) { continue }
     const line = lines[i]
     const lineIndentation = line.length - line.trimStart().length
 
@@ -622,34 +484,38 @@ export function getMdcComponentPropCompletionItemProvider (componentData: MDCCom
   const lineContent = document.lineAt(position.line).text
   const textUntilPosition = lineContent.slice(0, position.character)
 
-  /**
-   * Define basic pattern to identify MDC component prop usage,
-   * meaning a line that starts with at least one alphabetic character.
-   *
-   * Example: `a` or `  a` - it will then suggest MDC component props.
-   */
-  const propNamePattern = /^\s*[a-zA-Z-]{0,}$/
+  const lines = getModelLines(document)
+  const context = getComponentYamlContext(lines, position.line)
+  if (!context || isInsideYamlScalar(lines, position.line, context.start)) { return }
 
-  // If conditions not met, exit early
-  if (
-    !propNamePattern.test(textUntilPosition) || // If it doesn't match the syntax
-    componentData.length === 0 || // If there is no component data
-    !isInsideMDCComponent(document, position.line) || // If NOT inside a MDC block component
-    !isInsideYAMLBlock(document, position.line) || // If NOT inside a YAML block
-    isInsideCodeBlock(document, position.line) || // If inside a code block
-    isInsideYAMLMultilineString(document, position.line) // If inside a YAML multiline string
-  ) {
-    return
+  const currentMdcBlockName = context.component
+  const mdcComponent = componentData.find(c => c.mdc_name === currentMdcBlockName)
+  if (!mdcComponent?.component_meta?.meta?.props) { return }
+  const docsMarkdownLink = getComponentDocsLink(mdcComponent)
+  const currentYAMLPath = getCurrentYAMLPath(document, position.line)
+  const valuePosition = getYamlValuePosition(lineContent, position.character)
+
+  if (valuePosition) {
+    // Value completion handles top-level scalar props only.
+    const indent = lineContent.length - lineContent.trimStart().length
+    if (currentYAMLPath.length || indent !== context.indent) { return }
+    const prop = mdcComponent.component_meta.meta.props.find(p =>
+      p.name === valuePosition.prop || kebabCase(p.name) === valuePosition.prop || camelCase(p.name) === valuePosition.prop
+    )
+    if (!prop) { return }
+    return getPropLiteralValues(prop).map(value => ({
+      label: typeof value === 'string' ? JSON.stringify(value) : String(value),
+      kind: vscode.CompletionItemKind.EnumMember,
+      detail: prop.type,
+      documentation: new vscode.MarkdownString([prop.description, docsMarkdownLink].filter(Boolean).join('\n\n')),
+      filterText: valuePosition.quote ? valuePosition.quote + String(value) : String(value),
+      insertText: (lineContent[valuePosition.start - 1] === ':' ? ' ' : '') + formatYamlLiteral(value, valuePosition.quote),
+      range: new vscode.Range(position.line, valuePosition.start, position.line, valuePosition.end)
+    }))
   }
 
-  const currentYAMLPath = getCurrentYAMLPath(document, position.line)
-  const currentMdcBlockName = getCurrentMDCComponentName(document, position.line)
-
-  if (!currentMdcBlockName) { return }
-
-  const mdcComponent = componentData.find(c => c.mdc_name === currentMdcBlockName)
-  const docsMarkdownLink = getComponentDocsLink(mdcComponent)
-  if (!mdcComponent?.component_meta?.meta?.props) { return }
+  // Preserve the existing property-name provider and its nested-schema behavior.
+  if (!/^\s*[a-zA-Z-]*$/.test(textUntilPosition)) { return }
 
   const suggestionsByComponent = new Map<string, vscode.CompletionItem[]>()
   suggestionsByComponent.set(currentMdcBlockName, [])
@@ -678,6 +544,7 @@ export function getMdcComponentPropCompletionItemProvider (componentData: MDCCom
   }
 
   const existingProps = getCurrentYAMLBlockProps(document, position.line)
+  const editingExistingKey = /^\s*[\w-]+\s*:/.test(lineContent)
 
   for (const prop of propsToSuggest) {
     const { kebab: propNameKebab, camel: propNameCamel } = getCachedPropNames(currentMdcBlockName, prop.name)
@@ -719,7 +586,7 @@ export function getMdcComponentPropCompletionItemProvider (componentData: MDCCom
       sortText: prop.required ? '_' + propNameKebab : propNameKebab, // Force "required" props to the top
       kind: vscode.CompletionItemKind.Property,
       range: getKebabNameRange(lineContent, position, /^\s*/),
-      insertText: new vscode.SnippetString(getPropInsertText(propNameKebab, propValueType)), // Always insert kebab-case
+      insertText: new vscode.SnippetString(editingExistingKey ? propNameKebab : getPropInsertText(propNameKebab, propValueType)), // Always insert kebab-case
       detail: prop.description, // Shows up in the details section of the completion item
       documentation: new vscode.MarkdownString(docsMarkdownLink),
       command: {

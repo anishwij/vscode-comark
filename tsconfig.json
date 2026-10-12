@@ -21,6 +21,7 @@
     "scripts",
     "vitest.config.ts",
     "**/*.spec.ts",
+    "src/**/*.test.ts",
     "test/**/*"
   ]
 }

@@ -1,0 +1,166 @@
+[
+  {
+    "mdc_name": "card",
+    "docs_url": "https://example.com/card",
+    "component_meta": {
+      "pascalName": "Card",
+      "kebabName": "card",
+      "meta": {
+        "type": 2,
+        "props": [
+          {
+            "name": "variant",
+            "description": "Example variant.",
+            "required": true,
+            "type": "CardVariant | undefined",
+            "schema": {
+              "kind": "enum",
+              "type": "CardVariant | undefined",
+              "schema": [
+                "undefined",
+                "\"default\"",
+                "\"outline\"",
+                "\"muted\""
+              ]
+            },
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "enabled",
+            "description": "Example enabled.",
+            "required": false,
+            "type": "boolean | undefined",
+            "schema": {
+              "kind": "enum",
+              "type": "boolean | undefined",
+              "schema": [
+                "undefined",
+                "false",
+                "true"
+              ]
+            },
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "count",
+            "description": "Example count.",
+            "required": false,
+            "type": "1 | 2 | 3",
+            "schema": {
+              "kind": "enum",
+              "type": "1 | 2 | 3",
+              "schema": [
+                "1",
+                "2",
+                "3"
+              ]
+            },
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "text",
+            "description": "Example text.",
+            "required": false,
+            "type": "string",
+            "schema": "string",
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "number",
+            "description": "Example number.",
+            "required": false,
+            "type": "number",
+            "schema": "number",
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "stringBoolean",
+            "description": "Example stringBoolean.",
+            "required": false,
+            "type": "\"true\" | \"false\"",
+            "schema": {
+              "kind": "enum",
+              "type": "\"true\" | \"false\"",
+              "schema": [
+                "\"true\"",
+                "\"false\""
+              ]
+            },
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "longVariant",
+            "description": "Example longVariant.",
+            "required": false,
+            "type": "\"wide\" | \"narrow\"",
+            "schema": {
+              "kind": "enum",
+              "type": "\"wide\" | \"narrow\"",
+              "schema": [
+                "\"wide\"",
+                "\"narrow\""
+              ]
+            },
+            "tags": [],
+            "global": false
+          },
+          {
+            "name": "options",
+            "description": "Example options.",
+            "required": false,
+            "type": "{ size?: string }",
+            "schema": {
+              "kind": "enum",
+              "type": "{ size?: string } | undefined",
+              "schema": [
+                "undefined",
+                {
+                  "kind": "object",
+                  "type": "{ size?: string }",
+                  "schema": {
+                    "size": {
+                      "type": "string",
+                      "schema": "string",
+                      "description": "Nested size."
+                    }
+                  }
+                }
+              ]
+            },
+            "tags": [],
+            "global": false
+          }
+        ],
+        "slots": [],
+        "events": [],
+        "exposed": []
+      }
+    }
+  },
+  {
+    "mdc_name": "alert",
+    "component_meta": {
+      "meta": {
+        "type": 2,
+        "props": [
+          {
+            "name": "variant",
+            "type": "\"info\" | \"warning\"",
+            "description": "Alert appearance.",
+            "required": false,
+            "tags": []
+          }
+        ],
+        "slots": [],
+        "events": [],
+        "exposed": []
+      }
+    }
+  }
+]
